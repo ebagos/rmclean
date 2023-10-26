@@ -3,10 +3,11 @@
 use serde::{Serialize, Deserialize};
 use std::env;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Config {
@@ -17,7 +18,7 @@ struct Config {
 struct FileData {
     path: String,
     size: u64,
-    date: String,
+    date: u64,
     hash: u64,
 }
 
@@ -27,7 +28,7 @@ struct DirData {
 }
 
 // Configの読み込み
-fn readConfig(path: &str) -> Config {
+fn read_config(path: &str) -> Config {
     let file = File::open(path).expect("config.json path");
     let reader = BufReader::new(file);
     let result = serde_json::from_reader(reader).expect("config.json read error");
@@ -35,12 +36,12 @@ fn readConfig(path: &str) -> Config {
 }
 
 // 引数を解析する
-fn parseArgs() -> Vec<String> {
+fn parse_args() -> Vec<String> {
     env::args().collect()
 }
 
 // ファイルのハッシュ値を計算する
-fn calcHash(path: &str) -> u64 {
+fn calc_hash(path: &str) -> u64 {
     let file = File::open(path).expect("file path");
     let mut reader = BufReader::new(file);
     let mut hasher = DefaultHasher::new();
@@ -58,113 +59,130 @@ fn calcHash(path: &str) -> u64 {
 }
 
 // result.jsonを取得する
-fn getDirData(path: &str) -> DirData {
-    let file = File::open(path);
-    if file.is_err() {
-        return DirData { files: Vec::new() };
-    }
+fn get_dirdata(path: &str) -> DirData {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => return DirData { files: Vec::new() },
+    };
     let reader = BufReader::new(file);
-    let result = serde_json::from_reader(reader);
-    if result.is_err() {
-        return DirData { files: Vec::new() };
-    }
+    let result = match serde_json::from_reader(reader) {
+        Ok(result) => result,
+        Err(_) => return DirData { files: Vec::new() },
+    };
     result
 }
 
-// 与えられたファイルが DirDatas に記録されているか確認する
+// 与えられたファイルが dirdatas に記録されているか確認する
 // 一致するファイル名があった場合、サイズと更新日付を確認し、一致したらそのままリターンする
 // ファイル名が一致するがサイズや更新日付が一致しない場合、ファイル情報を更新する
-// 一致するファイル名がなかった場合、ファイル情報を獲得し、DirDatas.json に追加する
-fn checkFile(dirData: &mut DirData, path: &str) {
-    for file in dirData.files {
-        if file.path == path {
-            if file.size == size && file.date == date.to_string() {
-                return;
-            } else {
-                let size = std::fs::metadata(path).unwrap().len();
-                let date = std::fs::metadata(path).unwrap().modified().unwrap();
-                let hash = calcHash(path);
-                return;
-            }
+// 一致するファイル名がなかった場合、ファイル情報を獲得し、dirdatas.json に追加する
+fn check_file(dirdata: &mut DirData, path: &str) {
+    if let Some(existing_file) = dirdata.files.iter_mut().find(|f| f.path == path) {
+        let meta = std::fs::metadata(path).unwrap();
+        let size = meta.len();
+        let date = meta.modified().unwrap();
+        let date = date.duration_since(UNIX_EPOCH).unwrap().as_secs();
+    // Compare size and date, and update if different
+        if existing_file.size != size || existing_file.date != date {
+            existing_file.size = size;
+            existing_file.date = date;
+            existing_file.hash = calc_hash(path);
+        } else {
+            return;
         }
+    } else {
+        // If the file doesn't exist in the Vec, add it
+        let size = std::fs::metadata(path).unwrap().len();
+        let date = std::fs::metadata(path).unwrap().modified().unwrap();
+        let date = date.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let hash = calc_hash(path);
+        dirdata.files.push(FileData {
+            path: path.to_string(),
+            size: size,
+            date: date,
+            hash: hash,
+        });
     }
-    // DirData.filesに追加する
-    let size = std::fs::metadata(path).unwrap().len();
-    let date = std::fs::metadata(path).unwrap().modified().unwrap();
-    let hash = calcHash(path);
-    dirData.files.push(FileData {
-        path: path.to_string(),
-        size: size,
-        date: date.to_string(),
-        hash: hash,
-    });
 }
 
 // DirData.filesから存在しないファイルを削除する
-fn removeFromDirData(dirData: &mut DirData, path: &str) {
-    for file in dirData.files {
-        let path = Path::new(path);
-        if !path.is_file() {
-            dirData.files.remove(file);
+fn remove_from_dirdata(dirdata: &mut DirData) {
+    dirdata.files.retain(|file| {
+        if let Ok(_) = std::fs::metadata(&file.path) {
+            true // Keep the file if it exists
+        } else {
+            false // Remove the file if it doesn't exist
         }
-    }
+    });
 }
 
-// DirDataをresults.jsonに書き込む
-fn writeDirData(dirData: &DirData, path: &str) {
+// dirdataをresults.jsonに書き込む
+fn write_dirdata(dirdata: &DirData, path: &str) {
     let file = File::create(path).expect("file path");
-    serde_json::to_writer_pretty(file, &dirData).expect("json write error");
+    serde_json::to_writer_pretty(file, &dirdata).expect("json write error");
 }
 
 // results.jsonからハッシュ値が同じfileのうち更新日付が最新のものを残して他を削除する
-fn removeOldFiles(dirDatas: Vec<DirData>) {
+fn remove_old_files(dirs: Vec<DirData>) {
     let mut hash_map: HashMap<u64, FileData> = HashMap::new();
-    for dirData in dirDatas {
-        for file in dirData.files {
-            if hash_map.contains_key(file.hash) {
-                if hash_map[file.hash].date < file.date {
-                    let old = hash_map[file.hash];
-                    remove_file(old.path).expect("file remove error");
-                    hash_map[file.hash] = file;
+
+    for dir in dirs {
+        for file in dir.files {
+            if let Some(existing_file) = hash_map.get_mut(&file.hash) {
+                if existing_file.date < file.date {
+                    if let Err(err) = std::fs::remove_file(&existing_file.path) {
+                        eprintln!("File remove error: {:?}", err);
+                    }
+                    *existing_file = file;
+                } else {
+                    if let Err(err) = std::fs::remove_file(&file.path) {
+                        eprintln!("File remove error: {:?}", err);
+                    }
                 }
             } else {
+                // 登録されていないので追加する
                 hash_map.insert(file.hash, file);
             }
         }
     }
-
-    dirData.files = hash_map.values().collect();
-
+}
 // 単一ディレクトリの処理
-fn processDir(dir: &str) -> DirData {
-    let mut dirData = getDirData(dir + "/results.json");
+fn process_dir(dir: &str) -> DirData {
+    let mut dirdata = get_dirdata(format!("{}{}", dir, "/results.json").as_str());
     let paths = std::fs::read_dir(dir).unwrap();
     for path in paths {
         let path = path.unwrap().path();
         if path.is_file() {
-            if path.to_str().unwrap() == dir + "/results.json" {
+            if path.to_str().unwrap() == format!("{}{}", dir,"/results.json") {
                 continue;
             }
-            checkFile(&mut dirData, path.to_str().unwrap());
+            check_file(&mut dirdata, path.to_str().unwrap());
         }
     }
-    removeFromDirData(&mut dirData, dir);
-    writeDirData(&dirData, "results.json");
-    dirData
+    remove_from_dirdata(&mut dirdata);
+    let file_path = format!("{}{}", dir, "/results.json");
+    write_dirdata(&dirdata, &file_path);
+    dirdata
 }
 
 fn main() {
-    let mut config_path = "";
-    let args = parseArgs();
+    let config_path: &str;
+    let args = parse_args();
     if args.len() != 2 {
         config_path = "./config.json";
     } else {
-        configpath = args[1];
+        config_path = &args[1];
     }
-    let config = readConfig(config_path);
-    let all = Vec<DirData>::new();
+    let config = read_config(config_path);
+    let mut all = Vec::<DirData>::new();
     for dir in config.dirs {
-        all.push(processDir(dir));
+        let dd = process_dir(dir.as_str());
+        all.push(dd);
     }
+    remove_old_files(all);
 
+    let config = read_config(config_path);
+    for dir in config.dirs {
+        process_dir(dir.as_str());
+    }
 }

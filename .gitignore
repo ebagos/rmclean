@@ -1,1 +1,4 @@
 /target
+test/
+test.bak/
+config.json
