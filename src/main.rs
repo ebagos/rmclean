@@ -146,25 +146,62 @@ fn remove_old_files(dirs: Vec<DirData>) {
         }
     }
 }
+
 // 単一ディレクトリの処理
 fn process_dir(dir: &str) -> DirData {
-    let mut dirdata = get_dirdata(format!("{}{}", dir, "/results.json").as_str());
-    let paths = std::fs::read_dir(dir).unwrap();
-    for path in paths {
-        let path = path.unwrap().path();
-        if path.is_file() {
-            if path.to_str().unwrap() == format!("{}{}", dir,"/results.json") {
-                continue;
-            }
+    let mut dirdata = get_dirdata(&format!("{}/results.json", dir));
+    let paths: Vec<_> = std::fs::read_dir(dir).unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .collect();
+        
+    let file_count = paths.len();
+    for (counter, entry) in paths.iter().enumerate() {
+        let path = entry.path();
+        let path_name = path.file_name().unwrap().to_str().unwrap();
+
+        println!("Processing {} of {} in {}", counter + 1, file_count, dir);
+
+        if path_name != "results.json" {
             check_file(&mut dirdata, path.to_str().unwrap());
         }
+    }
+
+    remove_from_dirdata(&mut dirdata);
+    write_dirdata(&dirdata, &format!("{}/results.json", dir));
+    dirdata
+}
+
+/*
+fn process_dir(dir: &str) -> DirData {
+    let mut dirdata = get_dirdata(format!("{}{}", dir, "/results.json").as_str());
+    let paths = std::fs::read_dir(dir).unwrap()
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.is_file() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let file_count = paths.len();
+    let mut counter = 1;
+    for path in paths {
+        println!("processing {} of {} in {}", counter, file_count, dir);
+        counter += 1;
+        let path_name = path.file_name().unwrap().to_str().unwrap();
+        if path_name == "results.json" {
+            continue;
+        }
+        check_file(&mut dirdata, path.to_str().unwrap());
     }
     remove_from_dirdata(&mut dirdata);
     let file_path = format!("{}{}", dir, "/results.json");
     write_dirdata(&dirdata, &file_path);
     dirdata
 }
-
+*/
 fn main() {
     let config_path: &str;
     let args = parse_args();
