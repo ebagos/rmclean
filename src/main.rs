@@ -151,6 +151,36 @@ fn remove_old_files(dirs: Vec<DirData>) {
 fn process_dir(dir: &str) -> DirData {
     let mut dirdata = get_dirdata(&format!("{}/results.json", dir));
     let paths: Vec<_> = std::fs::read_dir(dir).unwrap()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if entry.file_type().ok()?.is_file() {
+                Some(entry)
+            } else {
+                None
+            }
+        })
+        .collect();
+            
+    let file_count = paths.len();
+    for (counter, entry) in paths.iter().enumerate() {
+        let path = entry.path();
+        let path_name = path.file_name().unwrap().to_str().unwrap();
+
+        println!("Processing {} of {} in {}", counter + 1, file_count, dir);
+
+        if path_name != "results.json" {
+            check_file(&mut dirdata, path.to_str().unwrap());
+        }
+    }
+
+    remove_from_dirdata(&mut dirdata);
+    write_dirdata(&dirdata, &format!("{}/results.json", dir));
+    dirdata
+}
+/*
+fn process_dir(dir: &str) -> DirData {
+    let mut dirdata = get_dirdata(&format!("{}/results.json", dir));
+    let paths: Vec<_> = std::fs::read_dir(dir).unwrap()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.path().is_file())
         .collect();
@@ -171,36 +201,6 @@ fn process_dir(dir: &str) -> DirData {
     write_dirdata(&dirdata, &format!("{}/results.json", dir));
     dirdata
 }
-
-/*
-fn process_dir(dir: &str) -> DirData {
-    let mut dirdata = get_dirdata(format!("{}{}", dir, "/results.json").as_str());
-    let paths = std::fs::read_dir(dir).unwrap()
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            if path.is_file() {
-                Some(path)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    let file_count = paths.len();
-    let mut counter = 1;
-    for path in paths {
-        println!("processing {} of {} in {}", counter, file_count, dir);
-        counter += 1;
-        let path_name = path.file_name().unwrap().to_str().unwrap();
-        if path_name == "results.json" {
-            continue;
-        }
-        check_file(&mut dirdata, path.to_str().unwrap());
-    }
-    remove_from_dirdata(&mut dirdata);
-    let file_path = format!("{}{}", dir, "/results.json");
-    write_dirdata(&dirdata, &file_path);
-    dirdata
-}
 */
 fn main() {
     let config_path: &str;
@@ -210,6 +210,7 @@ fn main() {
     } else {
         config_path = &args[1];
     }
+    println!("start pre-process");
     let config = read_config(config_path);
     let mut all = Vec::<DirData>::new();
     for dir in config.dirs {
@@ -218,6 +219,7 @@ fn main() {
     }
     remove_old_files(all);
 
+    println!("start post-process");
     let config = read_config(config_path);
     for dir in config.dirs {
         process_dir(dir.as_str());
