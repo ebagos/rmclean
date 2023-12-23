@@ -163,7 +163,12 @@ fn process_dir(dir: &str) -> DirData {
         let path = entry.path();
         let path_name = path.file_name().unwrap().to_str().unwrap();
 
-        println!("Processing {} of {} in {}", counter + 1, file_count, dir);
+        let str_len = 40 - dir.len();
+        let mut str_dir = String::from(dir);
+        for _ in 0..str_len {
+            str_dir.push(' ');
+        }
+        print!("Processing {} of {} in {}\r", counter + 1, file_count, str_dir);
 
         if path_name != "results.json" {
             check_file(&mut dirdata, path.to_str().unwrap());
@@ -193,11 +198,11 @@ fn main() {
     }
     remove_old_files(all);
 
-    println!("start post-process");
+    println!("\nstart post-process");
     let config = read_config(config_path);
     for dir in config.dirs {
         process_dir(dir.as_str());
     }
     let end = start.elapsed();
-    println!("{}.{:03} sec", end.as_secs(), end.subsec_nanos() / 1_000_000);
+    println!("\n{}.{:03} sec", end.as_secs(), end.subsec_nanos() / 1_000_000);
 }
