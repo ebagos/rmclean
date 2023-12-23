@@ -8,6 +8,7 @@ use std::fs::File;
 use std::hash::Hasher;
 use std::io::{BufReader, Read};
 use std::time::UNIX_EPOCH;
+use std::time::Instant;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Config {
@@ -130,11 +131,13 @@ fn remove_old_files(dirs: Vec<DirData>) {
         for file in dir.files {
             if let Some(existing_file) = hash_map.get_mut(&file.hash) {
                 if existing_file.date < file.date {
+                    println!("Remove file: {:?}", existing_file.path);
                     if let Err(err) = std::fs::remove_file(&existing_file.path) {
                         eprintln!("File remove error: {:?}", err);
                     }
                     *existing_file = file;
                 } else {
+                    println!("Remove file: {:?}", file.path);
                     if let Err(err) = std::fs::remove_file(&file.path) {
                         eprintln!("File remove error: {:?}", err);
                     }
@@ -148,36 +151,6 @@ fn remove_old_files(dirs: Vec<DirData>) {
 }
 
 // 単一ディレクトリの処理
-fn process_dir(dir: &str) -> DirData {
-    let mut dirdata = get_dirdata(&format!("{}/results.json", dir));
-    let paths: Vec<_> = std::fs::read_dir(dir).unwrap()
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            if entry.file_type().ok()?.is_file() {
-                Some(entry)
-            } else {
-                None
-            }
-        })
-        .collect();
-            
-    let file_count = paths.len();
-    for (counter, entry) in paths.iter().enumerate() {
-        let path = entry.path();
-        let path_name = path.file_name().unwrap().to_str().unwrap();
-
-        println!("Processing {} of {} in {}", counter + 1, file_count, dir);
-
-        if path_name != "results.json" {
-            check_file(&mut dirdata, path.to_str().unwrap());
-        }
-    }
-
-    remove_from_dirdata(&mut dirdata);
-    write_dirdata(&dirdata, &format!("{}/results.json", dir));
-    dirdata
-}
-/*
 fn process_dir(dir: &str) -> DirData {
     let mut dirdata = get_dirdata(&format!("{}/results.json", dir));
     let paths: Vec<_> = std::fs::read_dir(dir).unwrap()
@@ -201,8 +174,9 @@ fn process_dir(dir: &str) -> DirData {
     write_dirdata(&dirdata, &format!("{}/results.json", dir));
     dirdata
 }
-*/
+
 fn main() {
+    let start = Instant::now();
     let config_path: &str;
     let args = parse_args();
     if args.len() != 2 {
@@ -224,4 +198,6 @@ fn main() {
     for dir in config.dirs {
         process_dir(dir.as_str());
     }
+    let end = start.elapsed();
+    println!("{}.{:03} sec", end.as_secs(), end.subsec_nanos() / 1_000_000);
 }
